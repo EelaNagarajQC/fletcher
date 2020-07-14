@@ -357,8 +357,6 @@ class TextAccessor:
         else:
             return self._series_like(_zfill(self.data, width))
 
-        return self._call_str_accessor("zfill", width)
-
     def startswith(self, pat):
         """Check whether a row starts with a certain pattern."""
         return self._call_x_with(_startswith, pat)

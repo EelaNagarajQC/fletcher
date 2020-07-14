@@ -3,6 +3,7 @@ from typing import Any, List, Tuple
 
 import numpy as np
 import pyarrow as pa
+from numba import jit
 
 from fletcher._algorithms import _buffer_to_view, _merge_valid_bitmaps
 from fletcher._compat import njit
@@ -267,41 +268,38 @@ def _text_contains_case_sensitive(data: pa.Array, pat: str) -> pa.Array:
         pa.bool_(), len(data), [valid_buffer, pa.py_buffer(output)], data.null_count
     )
 
-
+@njit
 def _zfill_nonnull(
     length: int,
-    data: pa.Array,
     offsets: np.ndarray,
     data_buffer: np.ndarray,
     width: int,
-    str_builder: StringArrayBuilder,
-) -> None:
+    #str_builder: StringArrayBuilder,
+) -> StringArrayBuilder:
+    str_builder = StringArrayBuilder(2)
     for row_idx in range(length):
-        val = data[row_idx]
+        row_length = _compute_bytestring_length(data_buffer[offsets[row_idx] : offsets[row_idx + 1]])
         value = np.concatenate(
             (
-                np.frombuffer(
-                    # as_py: get the number of chars (instead of the len of string data)
-                    (max(0, width - len(val.as_py())) * b"0"),
-                    dtype=np.uint8,
-                ),
+                np.full(max(0, width - row_length), 48, dtype=np.uint8),
                 data_buffer[offsets[row_idx] : offsets[row_idx + 1]],
             ),
             axis=0,
         )
         str_builder.append_value(value, len(value))
+    return str_builder
 
-
+@njit
 def _zfill_nulls(
     length: int,
-    data: pa.Array,
     valid_bits: np.ndarray,
     valid_offset: int,
     offsets: np.ndarray,
     data_buffer: np.ndarray,
     width: int,
-    str_builder: StringArrayBuilder,
-) -> None:
+    #str_builder: StringArrayBuilder,
+) -> StringArrayBuilder:
+    str_builder = StringArrayBuilder(2)
     for row_idx in range(length):
         # Check whether the current entry is null.
         byte_offset = (row_idx + valid_offset) // 8
@@ -313,33 +311,48 @@ def _zfill_nulls(
             str_builder.append_null()
             continue
 
-        val = data[row_idx]
+        row_length = _compute_bytestring_length(data_buffer[offsets[row_idx] : offsets[row_idx + 1]])
         value = np.concatenate(
             (
-                np.frombuffer(
-                    (max(0, width - len(val.as_py())) * b"0"), dtype=np.uint8
-                ),
+                np.full(max(0, width - row_length), 48, dtype=np.uint8),
                 data_buffer[offsets[row_idx] : offsets[row_idx + 1]],
             ),
             axis=0,
         )
         str_builder.append_value(value, len(value))
+    return str_builder
 
 
 @apply_per_chunk
 def _zfill(data: pa.Array, width: int):
     offsets, data_buffer = _extract_string_buffers(data)
-    builder = StringArrayBuilder(max(len(data_buffer), 2))
+    #builder = StringArrayBuilder(max(len(data_buffer), 2))
 
     if data.null_count == 0:
-        _zfill_nonnull(len(data), data, offsets, data_buffer, width, builder)
+        builder = _zfill_nonnull(len(data), offsets, data_buffer, width) #, builder)
     else:
         valid = _buffer_to_view(data.buffers()[0])
-        _zfill_nulls(
-            len(data), data, valid, data.offset, offsets, data_buffer, width, builder
+        builder = _zfill_nulls(
+            len(data), valid, data.offset, offsets, data_buffer, width #, builder
         )
     return finalize_string_array(builder, pa.string())
 
+@njit
+def _compute_bytestring_length(bytestring: np.ndarray) -> int:
+    #utf8_mask = np.unpackbits(np.uint8(3 << 6))  # is 11000000
+    #ascii_mask = np.unpackbits(np.uint8(0))  # is 00000000
+
+    #bad_mask = np.unpackbits(np.uint8(1 << 7))
+
+    mask = 192  # 11000000
+
+    length = 0
+    for byte in bytestring:
+        masked = np.bitwise_and(byte, mask)
+        if masked != 128:  # 10xxxxxx
+            length += 1
+
+    return length
 
 @njit
 def _startswith(sa, needle, na, offset, out):
