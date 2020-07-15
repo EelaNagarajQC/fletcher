@@ -171,7 +171,7 @@ def test_text_zfill(data, fletcher_variant):
 
 
 def test_text_zfill_simple(fletcher_variant):
-    data = ["a", "b", "c", "ß", "ä", "æ"]
+    data = ["a", "b", "c", "ß", "ä", "æ", "-01", "+1"]
 
     ser_pd = pd.Series(data, dtype=str)
     max_str_len = ser_pd.map(_optional_len).max()

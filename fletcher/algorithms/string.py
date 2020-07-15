@@ -282,20 +282,22 @@ def _get_zstring(width: int, buffer: np.ndarray) -> np.ndarray:
 
 @njit
 def _get_zstring_2(
-    width: int, buffer: np.ndarray, temp_buffer: np.ndarray
-) -> np.ndarray:
+    width: int, buffer: np.ndarray, temp_buffer: np.ndarray, start: int
+) -> Tuple[int, int, int]:
     num_zeros = width
     for i in np.bitwise_xor(np.right_shift(buffer, 6), 2):
         if i != 0:
             num_zeros -= 1
+
     if num_zeros <= 0:
-        return buffer
-    # Create array of byte-representation of 0s concat'd with buffer
-    for buff_idx in range(num_zeros):
-        temp_buffer[buff_idx] = 48
-    for buff_idx in range(num_zeros, num_zeros + len(buffer)):
-        temp_buffer[buff_idx] = buffer[buff_idx - num_zeros]
-    return temp_buffer[0 : buff_idx + 1]
+        num_zeros = 0
+    if start + num_zeros + len(buffer) >= len(temp_buffer):
+        for buff_idx in range(len(temp_buffer)):
+            temp_buffer[buff_idx] = 48
+        start = 0
+    temp_buffer[start + num_zeros : start + num_zeros + len(buffer)] = buffer
+    return start, num_zeros, len(buffer)
+    # return temp_buffer[0:num_zeros + len(buffer)]
 
 
 @njit
@@ -326,13 +328,22 @@ def _zfill_nonnull(
     str_builder: StringArrayBuilder,
 ) -> None:
     if length:
-        temp_val_buffer = np.zeros(4 * width, dtype=np.uint8)
+        temp_val_buffer = np.full(16 * width, 48, dtype=np.uint8)
+        start = 0
 
     for row_idx in range(length):
-        value = _get_zstring_2(
-            width, data_buffer[offsets[row_idx] : offsets[row_idx + 1]], temp_val_buffer
+        start, num_zeros, str_len = _get_zstring_2(
+            width,
+            data_buffer[offsets[row_idx] : offsets[row_idx + 1]],
+            temp_val_buffer,
+            start,
         )
-        str_builder.append_value(value, len(value))
+
+        str_builder.append_value(
+            temp_val_buffer[start : start + num_zeros + str_len],
+            len(temp_val_buffer[start : start + num_zeros + str_len]),
+        )
+        start += num_zeros + str_len
 
 
 @njit
@@ -346,7 +357,8 @@ def _zfill_nulls(
     str_builder: StringArrayBuilder,
 ) -> None:
     if length:
-        temp_val_buffer = np.zeros(4 * width, dtype=np.uint8)
+        temp_val_buffer = np.full(16 * width, 48, dtype=np.uint8)
+        start = 0
 
     for row_idx in range(length):
         # Check whether the current entry is null.
@@ -358,10 +370,19 @@ def _zfill_nulls(
         if not valid:
             str_builder.append_null()
             continue
-        value = _get_zstring_2(
-            width, data_buffer[offsets[row_idx] : offsets[row_idx + 1]], temp_val_buffer
+
+        start, num_zeros, str_len = _get_zstring_2(
+            width,
+            data_buffer[offsets[row_idx] : offsets[row_idx + 1]],
+            temp_val_buffer,
+            start,
         )
-        str_builder.append_value(value, len(value))
+
+        str_builder.append_value(
+            temp_val_buffer[start : start + num_zeros + str_len],
+            len(temp_val_buffer[start : start + num_zeros + str_len]),
+        )
+        start += num_zeros + str_len
 
 
 @apply_per_chunk
