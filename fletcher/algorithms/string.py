@@ -328,7 +328,7 @@ def _zfill_nonnull(
     str_builder: StringArrayBuilder,
 ) -> None:
     if length:
-        temp_val_buffer = np.full(16 * width, 48, dtype=np.uint8)
+        temp_val_buffer = np.full(4 * width, 48, dtype=np.uint8)
         start = 0
 
     for row_idx in range(length):
@@ -357,7 +357,7 @@ def _zfill_nulls(
     str_builder: StringArrayBuilder,
 ) -> None:
     if length:
-        temp_val_buffer = np.full(16 * width, 48, dtype=np.uint8)
+        temp_val_buffer = np.full(4 * width, 48, dtype=np.uint8)
         start = 0
 
     for row_idx in range(length):
